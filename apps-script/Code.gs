@@ -21,6 +21,10 @@ function setup() {
     [['big', 'Big', '#2f5c9e'], ['game', 'Game', '#e0a100'], ['yui', 'Yui', '#c2408a'], ['papa', 'Papa', '#1e8a56']]
       .forEach(r => appendRow_(sh, M_COLS, { id: r[0], name: r[1], color: r[2], lineUserId: '', addedAt: now }));
   }
+  // Daily 07:00 summary to the family group (only sends when there are bookings that day).
+  if (!ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'dailySummary')) {
+    ScriptApp.newTrigger('dailySummary').timeBased().atHour(7).everyDays(1).inTimezone('Asia/Bangkok').create();
+  }
 }
 
 /** Creates the sheets the first time the app runs, so setup() never has to be run by hand. */
@@ -39,6 +43,10 @@ function doPost(e) {
   try {
     ensureReady_();
     const req = JSON.parse(e.postData.contents);
+    if (Array.isArray(req.events)) {           // LINE Messaging API webhook (the family-group bot)
+      handleWebhook_(req.events);
+      return ContentService.createTextOutput('OK');
+    }
     const me = verifyLine_(req.idToken);
     out = handle_(req, me);
   } catch (err) {
@@ -193,3 +201,90 @@ function str_(v, max) { return String(v == null ? '' : v).trim().slice(0, max); 
 function match_(v, re) { const s = str_(v, 40); if (!re.test(s)) fail_('invalid', 'Bad value: ' + s); return s; }
 function toMin_(t) { const p = t.split(':'); return Number(p[0]) * 60 + Number(p[1]); }
 function fail_(code, message) { const e = new Error(message); e.code = code; throw e; }
+
+// =====================================================================
+// LINE bot for the family group (Messaging API).
+// Script property LINE_ACCESS_TOKEN = long-lived channel access token of the LINE OA.
+// Replies (free) when someone types a keyword; pushes a 07:00 summary on days with bookings.
+// =====================================================================
+const LIFF_URL = 'https://liff.line.me/2012518451-2GtFIIPh';
+const BOT_KEYWORDS = ['จอง', 'จองรถ', 'ตาราง', 'ตารางรถ', 'คิว', 'คิวรถ', 'ใครใช้รถ', 'minion', 'มินเนี่ยน'];
+const TH_DAYS = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+const TH_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+
+function handleWebhook_(events) {
+  const token = PropertiesService.getScriptProperties().getProperty('LINE_ACCESS_TOKEN');
+  if (!token) return;
+  events.forEach(ev => {
+    try {
+      if (ev.source && ev.source.type === 'group') {
+        PropertiesService.getScriptProperties().setProperty('GROUP_ID', ev.source.groupId);
+      }
+      if (ev.type === 'join') {
+        lineApi_(token, 'reply', { replyToken: ev.replyToken, messages: [
+          { type: 'text', text: 'สวัสดีครับ 🚗 Minion มาแล้ว!\nพิมพ์ "จอง" หรือ "ตาราง" เพื่อดูคิวรถและเปิดตารางจอง\nทุกเช้า 7 โมงจะสรุปคิวรถของวันนั้นให้ (ถ้ามีคนจอง)' },
+          scheduleFlex_('ตารางรถ Minion', 2)
+        ] });
+      } else if (ev.type === 'message' && ev.message.type === 'text') {
+        const text = ev.message.text.trim().toLowerCase();
+        if (BOT_KEYWORDS.indexOf(text) !== -1) {
+          lineApi_(token, 'reply', { replyToken: ev.replyToken, messages: [scheduleFlex_('ตารางรถ Minion', 2)] });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+/** Time trigger (07:00 Asia/Bangkok). Run it by hand from the editor to test. */
+function dailySummary() {
+  const props = PropertiesService.getScriptProperties();
+  const token = props.getProperty('LINE_ACCESS_TOKEN'), groupId = props.getProperty('GROUP_ID');
+  if (!token || !groupId) return;
+  const today = Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyy-MM-dd');
+  if (!read_(sheet_(BOOKINGS), B_COLS).some(b => b.date === today)) return;   // quiet on free days, saves quota
+  lineApi_(token, 'push', { to: groupId, messages: [scheduleFlex_('สรุปคิวรถวันนี้', 1)] });
+}
+
+function scheduleFlex_(title, days) {
+  const members = read_(sheet_(MEMBERS), M_COLS);
+  const bookings = read_(sheet_(BOOKINGS), B_COLS);
+  const body = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(Date.now() + i * 86400000);
+    const iso = Utilities.formatDate(d, 'Asia/Bangkok', 'yyyy-MM-dd');
+    const parts = iso.split('-').map(Number);
+    const local = new Date(parts[0], parts[1] - 1, parts[2]);
+    const label = (i === 0 ? 'วันนี้' : 'พรุ่งนี้') + ' · ' + TH_DAYS[local.getDay()] + ' ' + parts[2] + ' ' + TH_MONTHS[parts[1] - 1];
+    body.push({ type: 'text', text: label, weight: 'bold', size: 'sm', color: '#1D3F73', margin: i ? 'lg' : 'none' });
+    const list = bookings.filter(b => b.date === iso).sort((a, b) => toMin_(a.start) - toMin_(b.start));
+    if (!list.length) body.push({ type: 'text', text: 'ว่างทั้งวัน ✅', size: 'sm', color: '#1E7A4C', margin: 'sm' });
+    list.forEach(b => {
+      const m = members.find(x => x.id === b.memberId);
+      body.push({ type: 'box', layout: 'baseline', spacing: 'md', margin: 'sm', contents: [
+        { type: 'text', text: b.start + '–' + b.end, size: 'sm', color: '#5F6A80', flex: 0 },
+        { type: 'text', text: (m ? m.name : 'ไม่ระบุ') + (b.purpose ? ' · ' + b.purpose : ''), size: 'sm', wrap: true,
+          color: (m && /^#[0-9a-fA-F]{6}$/.test(m.color)) ? m.color : '#1F2A44', weight: 'bold' }
+      ] });
+    });
+  }
+  return {
+    type: 'flex', altText: title + ' · กดเพื่อเปิดตารางจอง',
+    contents: { type: 'bubble', size: 'kilo',
+      header: { type: 'box', layout: 'vertical', backgroundColor: '#FFD60A', paddingAll: '14px',
+        contents: [{ type: 'text', text: '🚗 ' + title, weight: 'bold', size: 'md', color: '#1F2A44' }] },
+      body: { type: 'box', layout: 'vertical', contents: body },
+      footer: { type: 'box', layout: 'vertical', contents: [
+        { type: 'button', style: 'primary', color: '#1D3F73', height: 'sm', action: { type: 'uri', label: 'เปิดตารางจอง', uri: LIFF_URL } }
+      ] } }
+  };
+}
+
+function lineApi_(token, kind, payload) {
+  const res = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/' + kind, {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + token }, payload: JSON.stringify(payload)
+  });
+  if (res.getResponseCode() !== 200) console.error('LINE ' + kind + ' failed: ' + res.getContentText());
+}
