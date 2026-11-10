@@ -46,7 +46,17 @@ function ensureReady_() {
 function doGet() {
   ensureReady_();
   const hasChannel = !!(PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_ID') || LINE_CHANNEL_ID);
-  return ContentService.createTextOutput('Minion API is ready. Sheets OK. LINE channel: ' + (hasChannel ? 'set' : 'NOT set yet'));
+  const props = PropertiesService.getScriptProperties();
+  const linked = read_(sheet_(MEMBERS), M_COLS).filter(m => m.lineUserId).map(m => m.name);
+  return ContentService.createTextOutput([
+    'Minion API is ready. Sheets OK.',
+    'LINE login channel: ' + (hasChannel ? 'set' : 'NOT set'),
+    'Bot token: ' + (props.getProperty('LINE_ACCESS_TOKEN') ? 'set' : 'NOT set'),
+    'Family group: ' + (props.getProperty('GROUP_ID') ? 'known' : 'not seen yet'),
+    'Triggers: ' + ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction()).join(', '),
+    'Linked LINE accounts: ' + (linked.join(', ') || 'none yet'),
+    'Bookings: ' + read_(sheet_(BOOKINGS), B_COLS).length
+  ].join('\n'));
 }
 
 function doPost(e) {
