@@ -4,6 +4,8 @@
  * Script property LINE_CHANNEL_ID = the Channel ID of your LINE Login channel.
  * Every request must carry a LINE ID token; the script verifies it with LINE.
  */
+// LINE Login Channel ID (a public number, not a secret). Script property LINE_CHANNEL_ID overrides it.
+const LINE_CHANNEL_ID = '2012518451';
 const MEMBERS = 'Members', BOOKINGS = 'Bookings';
 const M_COLS = ['id', 'name', 'color', 'lineUserId', 'addedAt'];
 const B_COLS = ['id', 'memberId', 'date', 'start', 'end', 'purpose', 'note', 'createdBy', 'updatedAt'];
@@ -21,13 +23,21 @@ function setup() {
   }
 }
 
+/** Creates the sheets the first time the app runs, so setup() never has to be run by hand. */
+function ensureReady_() {
+  if (!SpreadsheetApp.getActive().getSheetByName(MEMBERS)) setup();
+}
+
 function doGet() {
-  return ContentService.createTextOutput('Minion API is running.');
+  ensureReady_();
+  const hasChannel = !!(PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_ID') || LINE_CHANNEL_ID);
+  return ContentService.createTextOutput('Minion API is ready. Sheets OK. LINE channel: ' + (hasChannel ? 'set' : 'NOT set yet'));
 }
 
 function doPost(e) {
   let out;
   try {
+    ensureReady_();
     const req = JSON.parse(e.postData.contents);
     const me = verifyLine_(req.idToken);
     out = handle_(req, me);
@@ -134,7 +144,7 @@ function payload_(me) {
 // ---------- LINE ID token check (cached 10 min) ----------
 function verifyLine_(token) {
   if (!token) fail_('auth', 'Missing LINE token');
-  const channelId = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_ID');
+  const channelId = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_ID') || LINE_CHANNEL_ID;
   if (!channelId) fail_('config', 'LINE_CHANNEL_ID is not set in Script properties');
   const key = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token));
   const cache = CacheService.getScriptCache();
