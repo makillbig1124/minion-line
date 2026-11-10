@@ -551,7 +551,7 @@ textarea { min-height: 64px; resize: vertical }
 
   // ---------- boot: LINE login, then load ----------
   (async () => {
-    if (!CFG.LIFF_ID || !CFG.API_URL || CFG.LIFF_ID.startsWith("ใส่")){ $("nowText").textContent = "ยังไม่ได้ตั้งค่า"; notice("ยังไม่ได้ใส่ LIFF_ID และ API_URL ในไฟล์ config.js ดูขั้นตอนใน README"); return }
+    if (!CFG.LIFF_ID || !CFG.API_URL || CFG.LIFF_ID.startsWith("ใส่") || !CFG.API_URL.startsWith("https:")){ $("nowText").textContent = "ยังไม่ได้ตั้งค่า"; notice("ยังไม่ได้ใส่ LIFF_ID และ API_URL ในไฟล์ config.js ดูขั้นตอนใน README"); return }
     try {
       await liff.init({ liffId: CFG.LIFF_ID });
       if (!liff.isLoggedIn()){ liff.login({ redirectUri: location.href }); return }
