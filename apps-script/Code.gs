@@ -22,14 +22,25 @@ function setup() {
       .forEach(r => appendRow_(sh, M_COLS, { id: r[0], name: r[1], color: r[2], lineUserId: '', addedAt: now }));
   }
   // Daily 07:00 summary to the family group (only sends when there are bookings that day).
-  if (!ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'dailySummary')) {
+  installTriggers_();
+}
+
+/** Daily 07:00 summary + a check every 5 minutes for bookings starting in about 30 minutes. */
+function installTriggers_() {
+  const have = ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction());
+  if (have.indexOf('dailySummary') === -1) {
     ScriptApp.newTrigger('dailySummary').timeBased().atHour(7).everyDays(1).inTimezone('Asia/Bangkok').create();
+  }
+  if (have.indexOf('remindSoon') === -1) {
+    ScriptApp.newTrigger('remindSoon').timeBased().everyMinutes(5).create();
   }
 }
 
 /** Creates the sheets the first time the app runs, so setup() never has to be run by hand. */
 function ensureReady_() {
   if (!SpreadsheetApp.getActive().getSheetByName(MEMBERS)) setup();
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('TRIGGERS_V') !== '2') { installTriggers_(); props.setProperty('TRIGGERS_V', '2'); }
 }
 
 function doGet() {
@@ -101,6 +112,7 @@ function handle_(req, me) {
         clean.id = Utilities.getUuid();
         appendRow_(sh, B_COLS, clean);
       }
+      try { announceBooking_(clean, existing); } catch (err) { console.error(err); }
       return payload_(me);
     }
 
@@ -222,14 +234,18 @@ function handleWebhook_(events) {
       }
       if (ev.type === 'join') {
         lineApi_(token, 'reply', { replyToken: ev.replyToken, messages: [
-          { type: 'text', text: 'สวัสดีครับ 🚗 Minion มาแล้ว!\nพิมพ์ "จอง" หรือ "ตาราง" เพื่อดูคิวรถและเปิดตารางจอง\nทุกเช้า 7 โมงจะสรุปคิวรถของวันนั้นให้ (ถ้ามีคนจอง)' },
+          { type: 'text', text: 'สวัสดีครับ 🚗 Minion มาแล้ว!\n\n' + HELP_TEXT },
           scheduleFlex_('ตารางรถ Minion', 2)
         ] });
       } else if (ev.type === 'message' && ev.message.type === 'text') {
         const text = ev.message.text.trim().toLowerCase();
-        if (BOT_KEYWORDS.indexOf(text) !== -1) {
-          lineApi_(token, 'reply', { replyToken: ev.replyToken, messages: [scheduleFlex_('ตารางรถ Minion', 2)] });
-        }
+        let msg = null;
+        if (BOT_KEYWORDS.indexOf(text) !== -1) msg = scheduleFlex_('ตารางรถ Minion', 2);
+        else if (text === 'วันนี้') msg = scheduleFlex_('คิวรถวันนี้', 1);
+        else if (text === 'พรุ่งนี้') msg = scheduleFlex_('คิวรถพรุ่งนี้', 1, 1);
+        else if (text === 'สัปดาห์นี้' || text === 'อาทิตย์นี้' || text === '7 วัน') msg = scheduleFlex_('คิวรถ 7 วัน', 7, 0, true);
+        else if (text === 'ช่วยด้วย' || text === 'help' || text === 'คำสั่ง') msg = { type: 'text', text: HELP_TEXT };
+        if (msg) lineApi_(token, 'reply', { replyToken: ev.replyToken, messages: [msg] });
       }
     } catch (err) {
       console.error(err);
@@ -247,19 +263,17 @@ function dailySummary() {
   lineApi_(token, 'push', { to: groupId, messages: [scheduleFlex_('สรุปคิวรถวันนี้', 1)] });
 }
 
-function scheduleFlex_(title, days) {
+function scheduleFlex_(title, days, offset, compact) {
   const members = read_(sheet_(MEMBERS), M_COLS);
   const bookings = read_(sheet_(BOOKINGS), B_COLS);
   const body = [];
-  for (let i = 0; i < days; i++) {
-    const d = new Date(Date.now() + i * 86400000);
-    const iso = Utilities.formatDate(d, 'Asia/Bangkok', 'yyyy-MM-dd');
-    const parts = iso.split('-').map(Number);
-    const local = new Date(parts[0], parts[1] - 1, parts[2]);
-    const label = (i === 0 ? 'วันนี้' : 'พรุ่งนี้') + ' · ' + TH_DAYS[local.getDay()] + ' ' + parts[2] + ' ' + TH_MONTHS[parts[1] - 1];
-    body.push({ type: 'text', text: label, weight: 'bold', size: 'sm', color: '#1D3F73', margin: i ? 'lg' : 'none' });
+  for (let k = 0; k < days; k++) {
+    const i = k + (offset || 0);
+    const iso = Utilities.formatDate(new Date(Date.now() + i * 86400000), 'Asia/Bangkok', 'yyyy-MM-dd');
+    const label = (i === 0 ? 'วันนี้ · ' : i === 1 ? 'พรุ่งนี้ · ' : '') + dayLabel_(iso);
     const list = bookings.filter(b => b.date === iso).sort((a, b) => toMin_(a.start) - toMin_(b.start));
-    if (!list.length) body.push({ type: 'text', text: 'ว่างทั้งวัน ✅', size: 'sm', color: '#1E7A4C', margin: 'sm' });
+    body.push({ type: 'text', text: label, weight: 'bold', size: 'sm', color: '#1D3F73', margin: k ? (compact ? 'md' : 'lg') : 'none' });
+    if (!list.length) body.push({ type: 'text', text: 'ว่างทั้งวัน ✅', size: compact ? 'xs' : 'sm', color: '#1E7A4C', margin: 'sm' });
     list.forEach(b => {
       const m = members.find(x => x.id === b.memberId);
       body.push({ type: 'box', layout: 'baseline', spacing: 'md', margin: 'sm', contents: [
@@ -287,4 +301,80 @@ function lineApi_(token, kind, payload) {
     headers: { Authorization: 'Bearer ' + token }, payload: JSON.stringify(payload)
   });
   if (res.getResponseCode() !== 200) console.error('LINE ' + kind + ' failed: ' + res.getContentText());
+}
+
+// =====================================================================
+// Group notifications: new/changed bookings, clashes, handover notes, 30-minute reminders.
+// Each push counts against the LINE OA monthly message quota (per person in the group).
+// =====================================================================
+const HELP_TEXT = 'คำสั่งที่พิมพ์ได้\n' +
+  '• จอง / ตาราง / คิว — คิวรถวันนี้และพรุ่งนี้\n' +
+  '• วันนี้ — คิวรถวันนี้\n' +
+  '• พรุ่งนี้ — คิวรถพรุ่งนี้\n' +
+  '• สัปดาห์นี้ — คิวรถ 7 วัน\n' +
+  '• คำสั่ง — ดูรายการนี้\n\n' +
+  'Minion จะแจ้งในกลุ่มเมื่อ\n' +
+  '📅 มีการจองใหม่หรือแก้เวลา\n' +
+  '⚠️ มีการจองชนกัน\n' +
+  '📝 มีโน้ตส่งต่อ เช่น แบตเหลือน้อย\n' +
+  '⏰ อีก 30 นาทีถึงคิวใช้รถ (แท็กชื่อคนขับ)\n' +
+  '☀️ สรุปคิวรถทุกเช้า 7 โมง (วันที่มีคนจอง)';
+
+function dayLabel_(iso) {
+  const p = iso.split('-').map(Number);
+  const local = new Date(p[0], p[1] - 1, p[2]);
+  return TH_DAYS[local.getDay()] + ' ' + p[2] + ' ' + TH_MONTHS[p[1] - 1];
+}
+
+function pushGroup_(messages) {
+  const props = PropertiesService.getScriptProperties();
+  const token = props.getProperty('LINE_ACCESS_TOKEN'), groupId = props.getProperty('GROUP_ID');
+  if (!token || !groupId || !messages.length) return;
+  lineApi_(token, 'push', { to: groupId, messages: messages });
+}
+
+/** One message per save: what changed, any clash, and the handover note. */
+function announceBooking_(b, old) {
+  const members = read_(sheet_(MEMBERS), M_COLS);
+  const nameOf = id => { const m = members.find(x => x.id === id); return m ? m.name : 'ไม่ระบุ'; };
+  const slot = dayLabel_(b.date) + ' ' + b.start + '–' + b.end + ' น.' + (b.purpose ? ' · ' + b.purpose : '');
+  const lines = [];
+  const timeChanged = !old || old.date !== b.date || old.start !== b.start || old.end !== b.end || old.memberId !== b.memberId;
+  if (!old) lines.push('📅 ' + nameOf(b.memberId) + ' จองรถ ' + slot);
+  else if (timeChanged) lines.push('✏️ แก้การจองเป็น ' + nameOf(b.memberId) + ' ' + slot);
+  if (timeChanged) {
+    const clashes = read_(sheet_(BOOKINGS), B_COLS).filter(o => o.id !== b.id && o.date === b.date &&
+      toMin_(o.start) < toMin_(b.end) && toMin_(b.start) < toMin_(o.end));
+    clashes.forEach(o => lines.push('⚠️ ชนกับ ' + nameOf(o.memberId) + ' ' + o.start + '–' + o.end + ' น. คุยกันหน่อยนะ'));
+  }
+  if (b.note && (!old || old.note !== b.note)) lines.push('📝 ' + nameOf(b.memberId) + ' ฝากโน้ต: ' + b.note);
+  if (lines.length) pushGroup_([{ type: 'text', text: lines.join('\n') }]);
+}
+
+/** Time trigger every 5 minutes: remind the driver ~30 minutes before their booking, with an @mention. */
+function remindSoon() {
+  const props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('LINE_ACCESS_TOKEN') || !props.getProperty('GROUP_ID')) return;
+  const now = Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyy-MM-dd HH:mm').split(' ');
+  const today = now[0], nowMin = toMin_(now[1]);
+  let sent = {};
+  try { sent = JSON.parse(props.getProperty('REMINDED') || '{}'); } catch (e) {}
+  Object.keys(sent).forEach(k => { if (sent[k] < today) delete sent[k]; });   // forget past days
+
+  const members = read_(sheet_(MEMBERS), M_COLS);
+  const due = read_(sheet_(BOOKINGS), B_COLS).filter(b => {
+    const left = toMin_(b.start) - nowMin;
+    return b.date === today && left > 5 && left <= 35 && !sent[b.id + '|' + b.date + '|' + b.start];
+  });
+  due.forEach(b => {
+    const m = members.find(x => x.id === b.memberId);
+    const rest = ' อีก ' + (toMin_(b.start) - nowMin) + ' นาทีถึงคิวใช้รถ Minion (' + b.start + '–' + b.end + ' น.' +
+      (b.purpose ? ' · ' + b.purpose : '') + ') 🚗';
+    const msg = (m && m.lineUserId)
+      ? { type: 'textV2', text: '⏰ {driver}' + rest, substitution: { driver: { type: 'mention', mentionee: { type: 'user', userId: m.lineUserId } } } }
+      : { type: 'text', text: '⏰ ' + (m ? m.name : 'คนขับ') + rest };
+    pushGroup_([msg]);
+    sent[b.id + '|' + b.date + '|' + b.start] = today;
+  });
+  props.setProperty('REMINDED', JSON.stringify(sent));
 }
