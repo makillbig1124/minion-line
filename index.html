@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Minion Family Schedule</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mitr:wght@500;600&family=IBM+Plex+Sans+Thai:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script src="config.js"></script>
+<style>
+/* Layout: mobile-first. Sticky yellow header (status + date strip), one-day hour timeline, floating "จอง" button, bottom sheets. */
+:root {
+  --bg: #fff6cc; --surface: #ffffff; --ink: #1f2a44; --muted: #5f6a80; --line: #eee1a6;
+  --denim: #2b5797; --denim-deep: #1d3f73; --denim-soft: #e3ecf9;
+  --yellow: #ffd60a; --on-yellow: #1f2a44;
+  --clash: #c2352b; --clash-bg: #fdecea; --ok: #1e7a4c; --ok-bg: #e5f4ec; --shade: rgba(15,21,34,.45);
+  --display: "Mitr", "IBM Plex Sans Thai", system-ui, sans-serif;
+  --body: "IBM Plex Sans Thai", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --hour: 60px;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0f1a30; --surface: #192746; --ink: #eef2fa; --muted: #a3b0c8; --line: #2c3d66;
+  --denim: #8fb3f0; --denim-deep: #3a64a8; --denim-soft: #22345c;
+  --clash: #ff8a80; --clash-bg: #3b1d1d; --ok: #6fd3a0; --ok-bg: #143026; --shade: rgba(0,0,0,.6); color-scheme: dark } }
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent }
+[hidden] { display: none !important }
+html, body { overflow-x: hidden }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.5 }
+button { font: inherit; color: inherit; cursor: pointer }
+:focus-visible { outline: 3px solid var(--yellow); outline-offset: 2px }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums }
+.gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+.shell { max-width: 640px; margin: 0 auto }
+
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--yellow) }
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--yellow); color: var(--on-yellow);
+  border-bottom: 10px solid var(--denim-deep); box-shadow: 0 4px 0 -1px var(--denim) }
+.top::after { content: ""; position: absolute; left: 0; right: 0; bottom: -8px; height: 6px; pointer-events: none;
+  background: radial-gradient(circle at 18% 50%, var(--yellow) 0 3px, transparent 3.5px), radial-gradient(circle at 82% 50%, var(--yellow) 0 3px, transparent 3.5px) }
+.top .shell { padding-block: 12px 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px }
+.titlebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0 }
+h1 { font-family: var(--display); font-size: 24px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 10px; color: var(--on-yellow) }
+.mascot { width: 64px; height: 44px; flex: none }
+.ghost { border: 0; background: var(--surface); color: var(--ink); border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 500; box-shadow: 0 2px 0 var(--denim-deep) }
+
+.now { display: flex; align-items: center; gap: 10px; background: var(--surface); color: var(--ink); border-radius: 12px; padding: 8px 12px; font-size: 15px; min-width: 0 }
+.now b { font-weight: 700 }
+.now .pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--denim); flex: none }
+.now.free { color: var(--ok) } .now.free .pulse { background: var(--ok) }
+
+.strip { display: flex; gap: 6px; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: 2px; scrollbar-width: none; min-width: 0 }
+.strip::-webkit-scrollbar { display: none }
+.dchip { flex: none; width: 52px; border: 1.5px solid transparent; background: var(--surface); color: var(--ink); border-radius: 14px; padding: 6px 0 4px; display: grid; justify-items: center; scroll-snap-align: center }
+.dchip .dw { font-size: 12px; color: var(--muted) }
+.dchip .dn { font-family: var(--display); font-size: 19px; font-weight: 600; line-height: 1.2 }
+.dchip .dots { display: flex; gap: 3px; height: 6px; align-items: center }
+.dchip .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--c) }
+.dchip.today { border-color: var(--denim-deep) }
+.dchip.sel { background: var(--denim-deep); color: #fff } .dchip.sel .dw { color: #fff; opacity: .8 }
+
+.dayhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-block: 18px 6px }
+.dayhead h2 { font-family: var(--display); font-size: 20px; font-weight: 500; margin: 0; text-wrap: balance }
+.dayhead span { color: var(--muted); font-size: 14px }
+.notice { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: var(--clash-bg); color: var(--clash); font-size: 14px }
+.hint { color: var(--muted); font-size: 14px; margin: 0 0 8px }
+
+.timeline { position: relative; background: var(--surface); border: 2px solid var(--denim); border-radius: 16px; box-shadow: 0 4px 0 var(--denim-deep); margin-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); overflow: hidden }
+.slot { display: grid; grid-template-columns: 54px 1fr; height: var(--hour); border: 0; border-top: 1px solid var(--line); width: 100%; background: none; padding: 0; text-align: left }
+.slot:first-child { border-top: 0 }
+.slot .hr { font-family: var(--mono); font-size: 12px; color: var(--muted); padding: 4px 0 0 10px }
+.slot .free { color: transparent; font-size: 13px; padding: 4px 8px }
+.slot:hover .free, .slot:focus-visible .free { color: var(--denim) }
+.slot.past { background: color-mix(in srgb, var(--bg) 60%, transparent) }
+.layer { position: absolute; left: 58px; right: 8px; top: 0; bottom: 0; pointer-events: none }
+.blk { position: absolute; pointer-events: auto; border: 0; border-radius: 10px; padding: 6px 10px; text-align: left; overflow: hidden;
+  background: color-mix(in srgb, var(--c) 18%, var(--surface)); border-left: 5px solid var(--c); display: grid; align-content: start; font-size: 14px; line-height: 1.35 }
+.blk .who { font-weight: 700; overflow-wrap: anywhere }
+.blk .t { font-family: var(--mono); font-size: 12px; color: var(--muted) }
+.blk .what { color: var(--muted); overflow-wrap: anywhere }
+.blk.clash { box-shadow: 0 0 0 2px var(--clash) inset }
+.blk .flag { color: var(--clash); font-size: 12px; font-weight: 700 }
+.nowline { position: absolute; left: 50px; right: 0; height: 2px; background: var(--clash); pointer-events: none; z-index: 2 }
+.nowline::before { content: ""; position: absolute; left: -4px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--clash) }
+.empty-day { position: absolute; left: 58px; right: 8px; top: calc(var(--hour) * 2.5); display: grid; justify-items: center; gap: 6px; color: var(--muted); font-size: 14px; pointer-events: none; text-align: center }
+.empty-day svg { width: 96px; height: 66px }
+
+.fab { position: fixed; z-index: 6; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  background: var(--denim-deep); color: var(--yellow); border: 3px solid var(--yellow); border-radius: 999px; padding: 12px 22px; font-family: var(--display); font-size: 18px; font-weight: 600; box-shadow: 0 6px 0 rgba(0,0,0,.18), 0 10px 24px rgba(20,40,80,.3) }
+
+.backdrop { position: fixed; inset: 0; background: var(--shade); z-index: 20 }
+.sheet { position: fixed; z-index: 21; left: 0; right: 0; bottom: 0; max-height: 92vh; overflow-y: auto; background: var(--surface); border-radius: 20px 20px 0 0; border-top: 6px solid var(--yellow);
+  padding-block: 8px calc(18px + env(safe-area-inset-bottom, 0px)) }
+@media (min-width: 680px) { .sheet { left: 50%; right: auto; width: 600px; transform: translateX(-50%) } }
+@media (prefers-reduced-motion: no-preference) { .sheet { animation: up .22s ease-out } @keyframes up { from { translate: 0 40px; opacity: .4 } } }
+.grab { width: 48px; height: 6px; border-radius: 3px; background: var(--yellow); margin: 0 auto 10px }
+.sheet h3 { font-family: var(--display); font-size: 21px; font-weight: 500; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px }
+.x { border: 0; background: var(--bg); border-radius: 50%; width: 36px; height: 36px; font-size: 18px; flex: none }
+.group { display: grid; gap: 8px; margin-bottom: 16px }
+.lbl { font-size: 14px; font-weight: 700; color: var(--muted) }
+.chips { display: flex; flex-wrap: wrap; gap: 8px }
+.chip { border: 1.5px solid var(--line); background: var(--bg); border-radius: 999px; padding: 8px 14px; font-size: 15px; display: inline-flex; align-items: center; gap: 8px; min-height: 42px }
+.chip .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--c) }
+.chip[aria-pressed="true"] { border-color: var(--denim); background: var(--denim-soft); font-weight: 700 }
+.chip.addp { border-style: dashed; color: var(--muted) }
+.chip.big { font-size: 18px; padding: 12px 20px }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px }
+select, input[type=text], input[type=date], textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px; width: 100%; min-width: 0; min-height: 46px }
+textarea { min-height: 64px; resize: vertical }
+.msg { font-size: 14px; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px }
+.msg.err { background: var(--clash-bg); color: var(--clash) } .msg.good { background: var(--ok-bg); color: var(--ok) }
+.actions { display: grid; gap: 8px }
+.primary { border: 0; background: var(--denim-deep); color: var(--yellow); border-radius: 14px; padding: 14px; font-family: var(--display); font-size: 17px; font-weight: 500; width: 100% }
+.primary:disabled { opacity: .5 }
+.danger { border: 1.5px solid var(--clash); color: var(--clash); background: none; border-radius: 14px; padding: 12px; font-weight: 700; width: 100% }
+.summary { font-size: 14px; color: var(--muted); margin: -6px 0 14px }
+.mlist { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px }
+.mlist li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; background: var(--bg); border-radius: 12px }
+.mlist .nm { display: flex; align-items: center; gap: 10px; min-width: 0; overflow-wrap: anywhere; font-weight: 500 }
+.mlist .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--c); flex: none }
+.mlist .you { font-size: 12px; color: var(--muted); font-weight: 400 }
+.mlist button { border: 0; background: none; color: var(--clash); font-size: 14px; padding: 6px }
+.addrow { display: flex; gap: 8px }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap }
+.sw { width: 34px; height: 34px; border-radius: 50%; border: 3px solid transparent; background: var(--c) }
+.sw[aria-pressed="true"] { border-color: var(--ink) }
+.rules { margin: 12px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; display: grid; gap: 4px }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="car" viewBox="0 0 64 44">
+    <path d="M6 30 C6 18 14 8 30 8 C44 8 54 16 58 26 L58 32 C58 34 56 35 54 35 L8 35 C6.5 35 6 33 6 30 Z" fill="#ffd60a" stroke="#1f2a44" stroke-width="2"/>
+    <path d="M8 27 L58 27 L58 32 C58 34 56 35 54 35 L8 35 C6.5 35 6 33 6 30 Z" fill="#2b5797" stroke="#1f2a44" stroke-width="2"/>
+    <circle cx="16" cy="31" r="1.6" fill="#ffd60a"/><circle cx="48" cy="31" r="1.6" fill="#ffd60a"/>
+    <rect x="8" y="16.5" width="46" height="4" rx="2" fill="#1f2a44"/>
+    <circle cx="31" cy="18.5" r="9" fill="#9aa3ad" stroke="#1f2a44" stroke-width="2"/>
+    <circle cx="31" cy="18.5" r="6" fill="#fff"/>
+    <circle cx="32.2" cy="18.8" r="2.8" fill="#6b4a2b"/><circle cx="32.6" cy="18.4" r="1.4" fill="#1f2a44"/>
+    <path d="M26 27.5 Q31 31 36 27.5" stroke="#ffd60a" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+    <circle cx="17" cy="37" r="5.5" fill="#1f2a44"/><circle cx="17" cy="37" r="2.2" fill="#9aa3ad"/>
+    <circle cx="47" cy="37" r="5.5" fill="#1f2a44"/><circle cx="47" cy="37" r="2.2" fill="#9aa3ad"/>
+  </symbol>
+</svg>
+
+<header class="top">
+  <div class="shell gutter">
+    <div class="titlebar">
+      <h1><svg class="mascot" viewBox="0 0 64 44" aria-hidden="true"><use href="#car"/></svg>Minion</h1>
+      <button class="ghost" id="openFamily" type="button">👨‍👩‍👧 ครอบครัว</button>
+    </div>
+    <div class="now" id="now" role="status"><span class="pulse"></span><span id="nowText">กำลังโหลด…</span></div>
+    <div class="strip" id="strip" aria-label="เลือกวัน"></div>
+  </div>
+</header>
+
+<main class="shell gutter">
+  <div id="notice" class="notice" hidden></div>
+  <div class="dayhead"><h2 id="dayTitle">วันนี้</h2><span id="dayCount"></span></div>
+  <p class="hint">แตะช่องเวลาที่ว่างเพื่อจอง หรือแตะรายการเพื่อแก้ไข</p>
+  <div class="timeline" id="timeline"></div>
+</main>
+
+<button class="fab" id="fab" type="button">＋ จองรถ</button>
+
+<!-- Booking sheet -->
+<div class="backdrop" id="bookBack" hidden></div>
+<section class="sheet gutter" id="bookSheet" role="dialog" aria-modal="true" aria-labelledby="bookTitle" hidden>
+  <div class="grab"></div>
+  <h3><span id="bookTitle">จองรถ Minion</span><button class="x" type="button" data-close aria-label="ปิด">✕</button></h3>
+  <p class="summary" id="bookSummary"></p>
+  <form id="bookForm" novalidate>
+    <div class="group"><span class="lbl">ใครขับ</span><div class="chips" id="whoChips"></div></div>
+    <div class="group"><label class="lbl" for="fDate">วันที่</label><input type="date" id="fDate"></div>
+    <div class="group">
+      <span class="lbl">เวลา</span>
+      <div class="row2"><select id="fStart" aria-label="เริ่ม"></select><select id="fEnd" aria-label="ถึง"></select></div>
+      <div class="chips" id="durChips"></div>
+    </div>
+    <div class="group">
+      <span class="lbl">ไปไหน</span>
+      <div class="chips" id="whyChips"></div>
+      <input type="text" id="fWhat" maxlength="80" placeholder="หรือพิมพ์เอง เช่น ไปหาหมอ">
+    </div>
+    <div class="group"><label class="lbl" for="fNote">โน้ตส่งต่อ (ไม่บังคับ)</label>
+      <textarea id="fNote" maxlength="200" placeholder="เช่น แบตเหลือ 40% เสียบชาร์จที่บ้านแล้ว"></textarea></div>
+    <div id="formMsg" class="msg" hidden></div>
+    <div class="actions">
+      <button class="primary" type="submit" id="fSubmit">ยืนยันการจอง</button>
+      <button class="danger" type="button" id="fDelete" hidden>ลบการจองนี้</button>
+    </div>
+  </form>
+</section>
+
+<!-- Family sheet -->
+<div class="backdrop" id="famBack" hidden></div>
+<section class="sheet gutter" id="famSheet" role="dialog" aria-modal="true" aria-labelledby="famTitle" hidden>
+  <div class="grab"></div>
+  <h3><span id="famTitle">คนในครอบครัว</span><button class="x" type="button" data-close aria-label="ปิด">✕</button></h3>
+  <ul class="mlist" id="mlist"></ul>
+  <form id="memberForm" class="group">
+    <label class="lbl" for="mName">เพิ่มคนขับ</label>
+    <div class="addrow"><input type="text" id="mName" maxlength="30" placeholder="ชื่อ เช่น พ่อ แม่ พี่ต้น"><button class="primary" style="width:auto;padding:0 18px" type="submit">เพิ่ม</button></div>
+    <div class="swatches" id="swatches" aria-label="เลือกสี"></div>
+  </form>
+  <div id="famMsg" class="msg" hidden></div>
+  <span class="lbl">กติกาบ้านเรา</span>
+  <ul class="rules">
+    <li>คืนรถแบตอย่างน้อย 30% หรือเสียบชาร์จไว้</li>
+    <li>ไปต่างจังหวัด จองทั้งวันและวางแผนแวะ Supercharger</li>
+    <li>แบตน้อยหรือมีอะไรผิดปกติ ให้เขียนโน้ตส่งต่อ</li>
+    <li>ถ้าจองชนกัน จะขึ้นกรอบสีแดง คุยกันในบ้านนะ</li>
+  </ul>
+</section>
+
+<!-- "Who are you?" sheet: links this LINE account to one family name, once -->
+<div class="backdrop" id="claimBack" hidden></div>
+<section class="sheet gutter" id="claimSheet" role="dialog" aria-modal="true" aria-labelledby="claimTitle" hidden>
+  <div class="grab"></div>
+  <h3><span id="claimTitle">คุณคือใครในบ้าน?</span><button class="x" type="button" data-close aria-label="ปิด" hidden>✕</button></h3>
+  <p class="summary" id="claimHello">เลือกชื่อของคุณครั้งเดียว ครั้งต่อไปเปิดจากไลน์ได้เลย</p>
+  <div class="chips" id="claimChips"></div>
+  <div id="claimMsg" class="msg" hidden style="margin-top:12px"></div>
+</section>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const CFG = window.MINION_CONFIG || {};
+  const DAYS = ["อา","จ","อ","พ","พฤ","ศ","ส"];
+  const PALETTE = ["#2f5c9e","#e0a100","#d0453a","#1e8a56","#7b4bb7","#e07020","#15899a","#c2408a"];
+  const FIRST_HOUR = 5, LAST_HOUR = 24;
+  const WHY = ["ไปทำงาน","รับส่งลูก","ซื้อของ","ไปเที่ยว","ต่างจังหวัด"];
+  const DUR = [[60,"1 ชม."],[120,"2 ชม."],[180,"3 ชม."],[240,"4 ชม."],["day","ทั้งวัน"]];
+  let members = [], bookings = [], me = null, idToken = null, ready = false;
+  let selDate = iso(new Date()), editingId = null, pickWho = "", pickColor = PALETTE[0];
+
+  // ---------- helpers ----------
+  function pad(n){ return String(n).padStart(2,"0") }
+  function iso(d){ return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()) }
+  function parse(s){ const [y,m,d] = s.split("-").map(Number); return new Date(y,m-1,d) }
+  function addDays(d,n){ const x = new Date(d); x.setDate(x.getDate()+n); return x }
+  function mins(t){ const [h,m] = t.split(":").map(Number); return h*60+m }
+  function hhmm(m){ return pad(Math.floor(m/60))+":"+pad(m%60) }
+  function at(date, t){ const x = parse(date); x.setMinutes(mins(t)); return x }
+  function thDate(s, opts){ return parse(s).toLocaleDateString("th-TH", opts || { weekday:"long", day:"numeric", month:"long" }) }
+  const byId = id => members.find(m => m.id === id);
+  const nameOf = id => byId(id)?.name || "ไม่ระบุ";
+  const colorOf = id => byId(id)?.color || "#8a94a6";
+  const overlaps = (a,b) => a.date===b.date && a.id!==b.id && mins(a.start) < mins(b.end) && mins(b.start) < mins(a.end);
+  const clashesOf = b => bookings.filter(o => overlaps(b,o));
+
+  // ---------- backend (Google Apps Script) ----------
+  async function api(action, body){
+    const r = await fetch(CFG.API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, idToken, ...(body || {}) }) });
+    const j = await r.json();
+    if (!j.ok){
+      if (j.code === "auth") relogin();
+      const e = new Error(j.message || "error"); e.code = j.code; throw e;
+    }
+    if (j.members) apply(j);
+    return j;
+  }
+  function apply(j){ members = j.members || []; bookings = j.bookings || []; me = j.me || me; render() }
+  function relogin(){
+    let last = 0; try { last = Number(sessionStorage.getItem("minion-relogin") || 0) } catch {}
+    if (Date.now() - last < 60000){ notice("เข้าสู่ระบบไลน์ไม่สำเร็จ ลองปิดแล้วเปิดใหม่ หรือแจ้งคนดูแลระบบ"); return }
+    try { sessionStorage.setItem("minion-relogin", String(Date.now())) } catch {}
+    liff.login({ redirectUri: location.href });
+  }
+  const refresh = () => api("list").then(() => { if (me && !me.memberId) openClaim() });
+
+  // ---------- render ----------
+  function render(){ renderNow(); renderStrip(); renderDay(); if (!$("famSheet").hidden) renderFamily(); if (!$("bookSheet").hidden) renderWho(); if (!$("claimSheet").hidden) renderClaim() }
+
+  function renderNow(){
+    if (!ready) return;
+    const now = new Date();
+    const cur = bookings.filter(b => at(b.date,b.start) <= now && now < at(b.date,b.end));
+    const box = $("now"), txt = $("nowText");
+    if (cur.length){
+      box.className = "now"; txt.textContent = "";
+      const b = document.createElement("b"); b.textContent = cur.map(x=>nameOf(x.memberId)).join(" และ ");
+      txt.append("ตอนนี้ ", b, " ใช้รถอยู่ · คืนรถ " + cur.map(b=>b.end).sort().pop() + " น.");
+    } else {
+      box.className = "now free";
+      const up = bookings.filter(b => at(b.date,b.start) > now).sort((a,b)=>at(a.date,a.start)-at(b.date,b.start))[0];
+      txt.textContent = "รถว่างอยู่ที่บ้าน" + (up ? " · คิวถัดไป " + nameOf(up.memberId) + " " + (up.date===iso(now) ? "วันนี้" : thDate(up.date,{weekday:"short",day:"numeric",month:"short"})) + " " + up.start + " น." : "");
+    }
+  }
+
+  function renderStrip(){
+    const strip = $("strip"); strip.textContent = "";
+    const today = new Date(); const start = addDays(today,-3); let selEl = null;
+    for (let i=0;i<31;i++){
+      const d = addDays(start,i), di = iso(d);
+      const b = document.createElement("button"); b.type = "button";
+      b.className = "dchip" + (di===iso(today)?" today":"") + (di===selDate?" sel":"");
+      b.setAttribute("aria-pressed", di===selDate); b.setAttribute("aria-label", thDate(di));
+      const w = document.createElement("span"); w.className = "dw"; w.textContent = di===iso(today) ? "วันนี้" : DAYS[d.getDay()];
+      const n = document.createElement("span"); n.className = "dn"; n.textContent = d.getDate();
+      const dots = document.createElement("span"); dots.className = "dots";
+      bookings.filter(x=>x.date===di).slice(0,4).forEach(x => { const i = document.createElement("i"); i.style.setProperty("--c", colorOf(x.memberId)); dots.append(i) });
+      b.append(w,n,dots);
+      b.onclick = () => { selDate = di; render() };
+      strip.append(b); if (di===selDate) selEl = b;
+    }
+    if (selEl) requestAnimationFrame(() => strip.scrollTo({ left: selEl.offsetLeft - strip.clientWidth/2 + selEl.offsetWidth/2, behavior: "smooth" }));
+  }
+
+  function renderDay(){
+    const isToday = selDate === iso(new Date());
+    $("dayTitle").textContent = (isToday ? "วันนี้ · " : "") + thDate(selDate);
+    const list = bookings.filter(b => b.date===selDate).sort((a,b)=>mins(a.start)-mins(b.start));
+    $("dayCount").textContent = list.length ? list.length + " การจอง" : "ว่างทั้งวัน";
+    const tl = $("timeline"); tl.textContent = "";
+    const H = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hour")) || 60;
+    const nowM = new Date().getHours()*60 + new Date().getMinutes();
+    const pastDay = parse(selDate) < parse(iso(new Date()));
+    for (let h=FIRST_HOUR; h<LAST_HOUR; h++){
+      const s = document.createElement("button"); s.type = "button"; s.className = "slot";
+      if (pastDay || (isToday && (h+1)*60 <= nowM)) s.classList.add("past");
+      s.setAttribute("aria-label", "จองเวลา " + pad(h) + ":00");
+      const hr = document.createElement("span"); hr.className = "hr"; hr.textContent = pad(h)+":00";
+      const fr = document.createElement("span"); fr.className = "free"; fr.textContent = "＋ แตะเพื่อจอง";
+      s.append(hr, fr);
+      s.onclick = () => openBook({ date: selDate, start: h*60 });
+      tl.append(s);
+    }
+    const layer = document.createElement("div"); layer.className = "layer"; tl.append(layer);
+    const lanes = [], placed = [];
+    for (const b of list){
+      let lane = lanes.findIndex(end => end <= mins(b.start));
+      if (lane === -1){ lane = lanes.length; lanes.push(0) }
+      lanes[lane] = mins(b.end); placed.push([b, lane]);
+    }
+    for (const [b, lane] of placed){
+      const cols = Math.max(...placed.filter(([o]) => o===b || overlaps(o,b)).map(([,l]) => l)) + 1;
+      const s = Math.max(mins(b.start), FIRST_HOUR*60), e = Math.min(mins(b.end), LAST_HOUR*60);
+      if (e <= s) continue;
+      const el = document.createElement("button"); el.type = "button";
+      const c = clashesOf(b);
+      el.className = "blk" + (c.length ? " clash" : "");
+      el.style.setProperty("--c", colorOf(b.memberId));
+      el.style.top = ((s - FIRST_HOUR*60) / 60 * H + 2) + "px";
+      el.style.height = Math.max(28, (e - s) / 60 * H - 4) + "px";
+      el.style.left = "calc(" + (lane/cols*100) + "% + " + (lane?3:0) + "px)";
+      el.style.width = "calc(" + (100/cols) + "% - " + (lane?3:0) + "px)";
+      const who = document.createElement("span"); who.className = "who"; who.textContent = nameOf(b.memberId);
+      const t = document.createElement("span"); t.className = "t"; t.textContent = b.start + "–" + b.end;
+      el.append(who, t);
+      if (b.purpose){ const w = document.createElement("span"); w.className = "what"; w.textContent = b.purpose; el.append(w) }
+      if (c.length){ const f = document.createElement("span"); f.className = "flag"; f.textContent = "⚠ ชนกับ " + c.map(x=>nameOf(x.memberId)).join(", "); el.append(f) }
+      el.setAttribute("aria-label", "แก้ไข: " + nameOf(b.memberId) + " " + b.start + " ถึง " + b.end);
+      el.onclick = () => openBook(null, b);
+      layer.append(el);
+    }
+    if (!list.length){
+      const em = document.createElement("div"); em.className = "empty-day";
+      em.innerHTML = '<svg viewBox="0 0 64 44" aria-hidden="true"><use href="#car"/></svg>';
+      const t = document.createElement("span"); t.textContent = ready ? "Minion ว่างทั้งวัน แตะช่องเวลาเพื่อจอง" : "กำลังโหลดตาราง…"; em.append(t);
+      tl.append(em);
+    }
+    if (isToday && nowM >= FIRST_HOUR*60){
+      const nl = document.createElement("div"); nl.className = "nowline";
+      nl.style.top = ((nowM - FIRST_HOUR*60)/60*H) + "px"; tl.append(nl);
+    }
+  }
+
+  // ---------- sheets ----------
+  let lastFocus = null;
+  function openSheet(id){ lastFocus = document.activeElement; $(id+"Back").hidden = false; $(id+"Sheet").hidden = false; const x = $(id+"Sheet").querySelector("[data-close]:not([hidden])"); x?.focus() }
+  function closeSheet(id){ $(id+"Back").hidden = true; $(id+"Sheet").hidden = true; lastFocus?.focus?.() }
+  ["book","fam"].forEach(id => { $(id+"Back").onclick = () => closeSheet(id); $(id+"Sheet").querySelector("[data-close]").onclick = () => closeSheet(id) });
+  document.addEventListener("keydown", e => { if (e.key === "Escape"){ if (!$("bookSheet").hidden) closeSheet("book"); else if (!$("famSheet").hidden) closeSheet("fam") } });
+  function showMsg(id, text, kind){ const m = $(id); m.textContent = text; m.className = "msg " + kind; m.hidden = !text }
+
+  // who-are-you
+  function openClaim(){ if (!$("claimSheet").hidden) return; renderClaim(); openSheet("claim") }
+  function renderClaim(){
+    const box = $("claimChips"); box.textContent = "";
+    if (me?.lineName) $("claimHello").textContent = "สวัสดี " + me.lineName + " เลือกชื่อของคุณครั้งเดียว ครั้งต่อไปเปิดจากไลน์ได้เลย";
+    const free = members.filter(m => !m.linked);
+    if (!free.length){ showMsg("claimMsg", "ทุกชื่อผูกกับบัญชีไลน์แล้ว ให้คนดูแลระบบเพิ่มชื่อของคุณใน Google Sheet", "err"); return }
+    for (const m of free){
+      const c = document.createElement("button"); c.type = "button"; c.className = "chip big";
+      const d = document.createElement("span"); d.className = "dot"; d.style.setProperty("--c", m.color);
+      c.append(d, m.name);
+      c.onclick = async () => {
+        c.disabled = true;
+        try { await api("claim", { memberId: m.id }); pickWho = m.id; closeSheet("claim") }
+        catch(e){ showMsg("claimMsg", e.code === "taken" ? "ชื่อนี้มีคนเลือกไปแล้ว ลองเลือกชื่ออื่น" : writeError(e), "err"); refresh().catch(()=>{}) }
+        finally { c.disabled = false }
+      };
+      box.append(c);
+    }
+  }
+
+  function fillTimes(){
+    const fs = $("fStart"), fe = $("fEnd");
+    if (fs.options.length) return;
+    for (let m=0; m<24*60; m+=30) fs.append(new Option(hhmm(m)+" น.", hhmm(m)));
+    for (let m=30; m<=24*60; m+=30) fe.append(new Option((m===1440?"24:00":hhmm(m))+" น.", m===1440?"24:00":hhmm(m)));
+  }
+  function setEnd(m){ $("fEnd").value = m >= 1440 ? "24:00" : hhmm(m); markDur() }
+  function markDur(){
+    const d = mins($("fEnd").value) - mins($("fStart").value);
+    [...$("durChips").children].forEach(c => c.setAttribute("aria-pressed", String(c.dataset.v === "day" ? ($("fStart").value==="06:00" && $("fEnd").value==="22:00") : Number(c.dataset.v) === d)));
+    summary();
+  }
+  function summary(){
+    const who = pickWho ? nameOf(pickWho) : "ยังไม่เลือกคนขับ";
+    $("bookSummary").textContent = who + " · " + ($("fDate").value ? thDate($("fDate").value,{weekday:"short",day:"numeric",month:"short"}) : "") + " · " + $("fStart").value + "–" + $("fEnd").value + " น.";
+  }
+  function renderWho(){
+    const box = $("whoChips"); box.textContent = "";
+    for (const m of members){
+      const c = document.createElement("button"); c.type = "button"; c.className = "chip";
+      c.setAttribute("aria-pressed", String(pickWho === m.id));
+      const d = document.createElement("span"); d.className = "dot"; d.style.setProperty("--c", m.color);
+      c.append(d, m.name);
+      c.onclick = () => { pickWho = m.id; renderWho(); summary() };
+      box.append(c);
+    }
+    const add = document.createElement("button"); add.type = "button"; add.className = "chip addp";
+    add.textContent = members.length ? "＋ เพิ่มคน" : "＋ เพิ่มคนในครอบครัวก่อน";
+    add.onclick = () => { closeSheet("book"); openFamily() };
+    box.append(add);
+  }
+  function openBook(slot, b){
+    if (!ready) return;
+    fillTimes();
+    editingId = b ? b.id : null;
+    $("bookTitle").textContent = b ? "แก้ไขการจอง" : "จองรถ Minion";
+    $("fSubmit").textContent = b ? "บันทึก" : "ยืนยันการจอง";
+    $("fDelete").hidden = !b; $("fDelete").dataset.armed = ""; $("fDelete").textContent = "ลบการจองนี้";
+    if (b){
+      pickWho = b.memberId; $("fDate").value = b.date; $("fStart").value = b.start; $("fEnd").value = b.end;
+      $("fWhat").value = b.purpose || ""; $("fNote").value = b.note || "";
+    } else {
+      pickWho = (me && byId(me.memberId)) ? me.memberId : (byId(pickWho) ? pickWho : "");
+      let start = slot ? slot.start : null;
+      if (start == null){ const n = new Date(); start = selDate===iso(n) ? Math.min(23*60, Math.ceil((n.getHours()*60+n.getMinutes())/30)*30) : 8*60 }
+      $("fDate").value = slot ? slot.date : selDate; $("fStart").value = hhmm(start); setEnd(start + 120);
+      $("fWhat").value = ""; $("fNote").value = "";
+    }
+    renderWho(); renderWhy(); markDur(); showMsg("formMsg","","");
+    openSheet("book");
+  }
+  for (const [v, label] of DUR){
+    const c = document.createElement("button"); c.type = "button"; c.className = "chip"; c.dataset.v = v; c.textContent = label;
+    c.onclick = () => { if (v === "day"){ $("fStart").value = "06:00"; setEnd(22*60) } else setEnd(mins($("fStart").value) + v) };
+    $("durChips").append(c);
+  }
+  function renderWhy(){
+    const box = $("whyChips"); box.textContent = "";
+    for (const w of WHY){
+      const c = document.createElement("button"); c.type = "button"; c.className = "chip"; c.textContent = w;
+      c.setAttribute("aria-pressed", String($("fWhat").value === w));
+      c.onclick = () => { $("fWhat").value = $("fWhat").value === w ? "" : w; renderWhy() };
+      box.append(c);
+    }
+  }
+  $("fWhat").addEventListener("input", renderWhy);
+  $("fStart").addEventListener("change", () => { if (mins($("fEnd").value) <= mins($("fStart").value)) setEnd(mins($("fStart").value) + 120); else markDur() });
+  $("fEnd").addEventListener("change", markDur);
+  $("fDate").addEventListener("change", summary);
+
+  $("bookForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const b = { id: editingId || "", memberId: pickWho, date: $("fDate").value, start: $("fStart").value, end: $("fEnd").value,
+                purpose: $("fWhat").value.trim(), note: $("fNote").value.trim() };
+    if (!b.memberId) return showMsg("formMsg", "แตะชื่อคนขับก่อนนะ", "err");
+    if (!b.date) return showMsg("formMsg", "เลือกวันที่ก่อนนะ", "err");
+    if (mins(b.end) <= mins(b.start)) return showMsg("formMsg", "เวลาสิ้นสุดต้องหลังเวลาเริ่ม ถ้าค้างคืนให้จองแยกเป็นรายวัน", "err");
+    const c = clashesOf({ ...b, id: editingId || "__new" });
+    const btn = $("fSubmit"); btn.disabled = true; btn.textContent = "กำลังบันทึก…";
+    try {
+      await api("saveBooking", { booking: b });
+      selDate = b.date; closeSheet("book"); render();
+      if (c.length) notice("จองแล้ว แต่ชนกับ " + c.map(x=>nameOf(x.memberId)).join(", ") + " ลองคุยกันดูนะ", 6000);
+    } catch(err){ showMsg("formMsg", writeError(err), "err") }
+    finally { btn.disabled = false; btn.textContent = editingId ? "บันทึก" : "ยืนยันการจอง" }
+  });
+  $("fDelete").onclick = async () => {
+    const btn = $("fDelete");
+    if (!btn.dataset.armed){ btn.dataset.armed = "1"; btn.textContent = "แตะอีกครั้งเพื่อลบ"; return }
+    btn.disabled = true;
+    try { await api("deleteBooking", { id: editingId }); closeSheet("book") }
+    catch(err){ showMsg("formMsg", writeError(err), "err") }
+    finally { btn.disabled = false }
+  };
+
+  // ---------- family ----------
+  function openFamily(){ if (!ready) return; renderFamily(); openSheet("fam") }
+  $("openFamily").onclick = openFamily;
+  function renderFamily(){
+    const ul = $("mlist"); ul.textContent = "";
+    if (!members.length){ const li = document.createElement("li"); li.textContent = "ยังไม่มีคนขับ เพิ่มชื่อทุกคนที่ใช้รถ Minion ด้านล่าง"; ul.append(li) }
+    for (const m of members){
+      const li = document.createElement("li");
+      const nm = document.createElement("span"); nm.className = "nm";
+      const d = document.createElement("span"); d.className = "dot"; d.style.setProperty("--c", m.color);
+      const you = document.createElement("span"); you.className = "you";
+      you.textContent = me && m.id === me.memberId ? "(คุณ)" : (m.linked ? "· เชื่อมไลน์แล้ว" : "· ยังไม่เชื่อมไลน์");
+      nm.append(d, m.name, you);
+      const del = document.createElement("button"); del.type = "button"; del.textContent = "ลบ";
+      del.setAttribute("aria-label", "ลบ " + m.name);
+      del.onclick = async () => {
+        if (del.dataset.armed !== "1"){ del.dataset.armed = "1"; del.textContent = bookings.some(b=>b.memberId===m.id) ? "มีการจองอยู่ แตะอีกครั้ง" : "แตะอีกครั้งเพื่อลบ"; return }
+        try { await api("deleteMember", { id: m.id }) } catch(err){ showMsg("famMsg", writeError(err), "err") }
+      };
+      li.append(nm, del); ul.append(li);
+    }
+    const sw = $("swatches"); sw.textContent = "";
+    for (const c of PALETTE){
+      const b = document.createElement("button"); b.type = "button"; b.className = "sw"; b.style.setProperty("--c", c);
+      b.setAttribute("aria-pressed", String(c === pickColor)); b.setAttribute("aria-label", "สี " + c);
+      b.onclick = () => { pickColor = c; renderFamily() };
+      sw.append(b);
+    }
+  }
+  $("memberForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const name = $("mName").value.trim(); if (!name) return showMsg("famMsg","พิมพ์ชื่อก่อนนะ","err");
+    try {
+      await api("addMember", { name, color: pickColor });
+      $("mName").value = ""; pickColor = PALETTE[(PALETTE.indexOf(pickColor)+1) % PALETTE.length];
+      showMsg("famMsg", "เพิ่ม " + name + " แล้ว", "good"); renderFamily();
+    } catch(err){ showMsg("famMsg", writeError(err), "err") }
+  });
+
+  function writeError(e){
+    if (e && e.code === "not_member") return "เลือกชื่อของคุณก่อน แล้วค่อยจองหรือแก้ไข";
+    if (e && e.code === "invalid") return "ข้อมูลไม่ถูกต้อง ตรวจวันที่และเวลาอีกครั้ง";
+    if (e && e.code === "auth") return "กำลังเข้าสู่ระบบไลน์ใหม่…";
+    return "บันทึกไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง";
+  }
+  let noticeTimer = null;
+  function notice(t, ms){ const n = $("notice"); n.textContent = t; n.hidden = !t; clearTimeout(noticeTimer); if (t && ms) noticeTimer = setTimeout(() => { n.hidden = true }, ms) }
+
+  $("fab").onclick = () => openBook(null);
+  setInterval(() => { renderNow(); if (selDate === iso(new Date())) renderDay() }, 60000);
+  render();
+
+  // ---------- boot: LINE login, then load ----------
+  (async () => {
+    if (!CFG.LIFF_ID || !CFG.API_URL || CFG.LIFF_ID.startsWith("ใส่")){ $("nowText").textContent = "ยังไม่ได้ตั้งค่า"; notice("ยังไม่ได้ใส่ LIFF_ID และ API_URL ในไฟล์ config.js ดูขั้นตอนใน README"); return }
+    try {
+      await liff.init({ liffId: CFG.LIFF_ID });
+      if (!liff.isLoggedIn()){ liff.login({ redirectUri: location.href }); return }
+      idToken = liff.getIDToken();
+      await refresh();
+      ready = true; render();
+      const h = Math.max(FIRST_HOUR, Math.min(new Date().getHours() - 1, 20)); const el = $("timeline").children[h - FIRST_HOUR];
+      if (el && h > 7) window.scrollTo({ top: el.getBoundingClientRect().top + scrollY - 220 });
+      setInterval(() => { if (!document.hidden) refresh().catch(()=>{}) }, 30000);
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh().catch(()=>{}) });
+    } catch(e){
+      $("nowText").textContent = "เชื่อมต่อไม่ได้";
+      notice(e.code === "config" ? "ระบบหลังบ้านยังตั้งค่าไม่ครบ: " + e.message : "โหลดตารางไม่ได้ ตรวจอินเทอร์เน็ตแล้วเปิดใหม่ (" + (e.message || e) + ")");
+    }
+  })();
+})();
+</script>
+</body>
+</html>
